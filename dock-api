@@ -1,0 +1,15 @@
+FROM maven:3.6.0-jdk-11-slim
+
+RUN sed -i 's/deb.debian.org/archive.debian.org/g' /etc/apt/sources.list
+RUN sed -i 's/security.debian.org/archive.debian.org/g' /etc/apt/sources.list
+RUN sed -i '6 s/^/#/' /etc/apt/sources.list
+RUN rm -f /etc/apt/sources.list.d/stretch-backports.list
+
+RUN apt-get update && apt-get install -y netcat jq && rm -rf /var/lib/apt/lists/*
+WORKDIR /work
+#1 cache pom dependencies
+COPY pom.xml .
+RUN mvn clean install -DskipTests
+#2 cache final test package
+COPY . .
+RUN mvn test -DskipTests
