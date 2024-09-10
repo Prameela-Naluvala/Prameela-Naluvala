@@ -1,0 +1,144 @@
+devopsWebhook       = 'https://fundsaxis2.webhook.office.com/webhookb2/60d237ee-f3a2-4f04-adb7-27959c127730@c56018d0-aefb-49ba-adda-e4ddb4438bcf/IncomingWebhook/b44f555c2135422c81d3b9a2d7244d72/639cc0b8-ad5d-4c14-8940-211e40ef15c7'
+buildfailureWebhook = 'https://fundsaxis2.webhook.office.com/webhookb2/60d237ee-f3a2-4f04-adb7-27959c127730@c56018d0-aefb-49ba-adda-e4ddb4438bcf/IncomingWebhook/39637e2c0b3348349cb3fb4be37cc4fa/a8db0d6a-19a5-4f60-8453-d3d41add906f'
+
+region              = "eu-west-1"
+appRepository       = "034353630586.dkr.ecr.eu-west-1.amazonaws.com/devfundsaxis/abcdocservice-v2"
+deployerRepository  = "034353630586.dkr.ecr.eu-west-1.amazonaws.com/devfundsaxis/jenkins-deployment"
+appName             = 'documentservice-v2'
+
+devCluster   = 'dev-abcdocs-documentservice-v2'
+devEnv       = 'dev-abcdocs'
+//dev-abcdocs-documentservice-v2
+branchName = ""
+appVersion = ""
+
+def ecrLogin() {
+  sh "aws ecr get-login-password --region eu-west-1 | sudo docker login --username AWS --password-stdin 034353630586.dkr.ecr.eu-west-1.amazonaws.com"
+}
+def getBranchName() {
+  if( ! branchName ) {
+    branchName = env.BRANCH_NAME.toLowerCase().replaceAll("/", "__")
+  }
+  return branchName
+}
+def getAppVersion() {
+  if( ! appVersion ) {
+    appVersion = sh(returnStdout: true, script: 'git log -1 --pretty=\'format:%cd-%h\' --date=\'short\'').trim()
+  }
+  return appVersion
+}
+
+pipeline {
+  agent none
+  options {
+    disableConcurrentBuilds()
+    timeout(time: 2, unit: 'HOURS')
+    timestamps()
+    ansiColor('xterm')
+  }
+  stages {
+    stage('Stage: Build Container') {
+      when {        
+          branch 'development'       
+          beforeAgent true
+      }
+      agent {
+        label 'docker'
+      }
+      environment {
+                ROLE_ARN = 'arn:aws:iam::034353630586:role/prod-mgmt-jenkins-assumerole'
+                SESSION_NAME = 'JenkinsProdSession'
+                REGION = 'eu-west-1'
+            }
+      stages {
+        stage('Assume Role') {
+            steps {
+                withAWS(region: "${env.REGION}", role: "${env.ROLE_ARN}", roleSessionName: "${env.SESSION_NAME}") {
+                    script {
+                        sh "aws sts get-caller-identity"
+                    }
+                }
+            }
+        }         
+      
+      stages {
+        stage('Docker build') {
+          steps {
+            office365ConnectorSend message:"Build started ${env.JOB_NAME} ${env.BUILD_NUMBER} (<${env.BUILD_URL}|Open>)", status: "Started", color: "999999", webhookUrl: devopsWebhook            
+            withAWS(region: "${env.REGION}", role: "${env.ROLE_ARN}", roleSessionName: "${env.SESSION_NAME}") {
+              sh "sudo docker build . -t ${appRepository}:${getAppVersion()}"
+            }  
+          }
+          post {
+            failure {
+              script {
+                if("${env.BRANCH_NAME}" == 'development') {
+                  office365ConnectorSend message: "Build Failed! ${env.JOB_NAME} ${env.BUILD_NUMBER} ", status: "Failure", color: "d00000", webhookUrl: buildfailureWebhook
+                }
+              }
+            }
+          }
+        }
+        stage('Docker push') {
+          steps {
+            withAWS(region: "${env.REGION}", role: "${env.ROLE_ARN}", roleSessionName: "${env.SESSION_NAME}") {
+              ecrLogin()
+              sh "sudo docker push ${appRepository}:${getAppVersion()}"
+          }
+          }
+        }
+      }    
+    stage('Deploy to Dev') {
+            when {
+                branch 'development'
+                beforeAgent true
+            }
+            agent {
+                label 'docker'
+            }
+            
+            steps {
+                withAWS(region: "${env.REGION}", role: "${env.ROLE_ARN}", roleSessionName: "${env.SESSION_NAME}") { 
+                  ecrLogin()
+                  sh """
+                    sudo docker run --rm 034353630586.dkr.ecr.eu-west-1.amazonaws.com/devfundsaxis/jenkins-deployment \
+                        ecs deploy ${devCluster} ${devEnv}-${appName} -t ${getAppVersion()} --region eu-west-1 --timeout 1800
+                    """
+                }  
+            }
+            post {
+                success {
+                 office365ConnectorSend message: "Deployed Dev ${env.JOB_NAME} - ${env.BUILD_NUMBER} - ${getAppVersion()}", status: "Success", color: "50df16", webhookUrl: devopsWebhook
+                }
+                aborted {
+                 office365ConnectorSend message: "Could not deploy Dev ${env.JOB_NAME} - ${env.BUILD_NUMBER} - ${getAppVersion()}", status: "Aborted", color: "999999", webhookUrl: buildfailureWebhook
+                }
+            }
+          }    
+        }
+      }
+  }
+   post {
+    failure {
+      script {
+        if("${env.BRANCH_NAME}" == 'development') {
+          office365ConnectorSend message: "CI Pipeline Failed! ${env.JOB_NAME}", status: "Failure", color: "d00000", webhookUrl: buildfailureWebhook
+        }
+      }
+    }
+    unstable {
+      script {
+        if("${env.BRANCH_NAME}" == 'development') {
+          office365ConnectorSend message: "CI Pipeline is unstable. ${env.JOB_NAME}", status: "Unstable", color: "ffcc00", webhookUrl: buildfailureWebhook
+        }
+      }
+    }
+    aborted {
+      script {
+        if("${env.BRANCH_NAME}" == 'development') {
+          office365ConnectorSend message: "CI Pipeline Aborted! ${env.JOB_NAME}", status: "Aborted", color: "999999", webhookUrl: buildfailureWebhook
+        }
+      }
+    }
+  }
+}
