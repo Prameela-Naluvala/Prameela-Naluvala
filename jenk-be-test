@@ -22,18 +22,18 @@ branchName = ""
 appVersion = ""
 
 def ecrLogin() {
-  sh "eval \$(aws ecr get-login --no-include-email --region=eu-west-1)"
+  sh "eval \$(aws ecr get-login --no-include-email --region=${region})"
 }
 
 def getBranchName() {
-  if( ! branchName ) {
+  if (!branchName) {
     branchName = env.BRANCH_NAME.toLowerCase().replaceAll("/", "__")
   }
   return branchName
 }
 
 def getAppVersion() {
-  if( ! appVersion ) {
+  if (!appVersion) {
     appVersion = sh(returnStdout: true, script: 'git log -1 --pretty=\'format:%cd-%h\' --date=\'short\'').trim()
   }
   return appVersion
@@ -46,33 +46,37 @@ def getAppVersionWithBranchName() {
 }
 
 def deployerDeploy(name) {                
-                    ecrLogin()                    
-                    sh """
-                      docker run --rm ${deployerRepository} \
-                        ecs deploy ${name} ${name}-${appName} -t ${getAppVersionWithBranchName()} --region eu-west-1 --timeout 1800
-                    """                    
+  ecrLogin()                    
+  sh """
+    docker run --rm ${deployerRepository} \
+      ecs deploy ${name} ${name}-${appName} -t ${getAppVersionWithBranchName()} --region ${region} --timeout 1800
+  """                    
 }
+
 def deployerDeployWorker(name) {                
-                    ecrLogin()
-                    sh """
-                      docker run --rm ${deployerRepository} \
-                        ecs deploy ${name} ${name}-${appName}-worker -t ${getAppVersionWithBranchName()} --region eu-west-1 --timeout 1800
-                    """                                       
+  ecrLogin()
+  sh """
+    docker run --rm ${deployerRepository} \
+      ecs deploy ${name} ${name}-${appName}-worker -t ${getAppVersionWithBranchName()} --region ${region} --timeout 1800
+  """                                       
 }
+
 def deployerDeployRules(name) {                
-                    ecrLogin()                    
-                    sh """
-                      docker run --rm ${deployerRepository} \
-                        ecs deploy ${name} ${name}-${appName}-worker-rulesprocessing -t ${getAppVersionWithBranchName()} --region eu-west-1 --timeout 1800
-                    """                     
+  ecrLogin()                    
+  sh """
+    docker run --rm ${deployerRepository} \
+      ecs deploy ${name} ${name}-${appName}-worker-rulesprocessing -t ${getAppVersionWithBranchName()} --region ${region} --timeout 1800
+  """                     
 }
+
 def deployerDeployCalcs(name) {                
-                    ecrLogin()                    
-                    sh """
-                      docker run --rm ${deployerRepository} \
-                        ecs deploy ${name} ${name}-${appName}-worker-calculations -t ${getAppVersionWithBranchName()} --region eu-west-1 --timeout 1800
-                    """
+  ecrLogin()                    
+  sh """
+    docker run --rm ${deployerRepository} \
+      ecs deploy ${name} ${name}-${appName}-worker-calculations -t ${getAppVersionWithBranchName()} --region ${region} --timeout 1800
+  """
 }
+
 pipeline {
   agent none
   options {
@@ -99,7 +103,7 @@ pipeline {
         label 'docker'
       }
       environment {
-        repository = sh(returnStdout: true, script: "if [ $BRANCH_NAME == 'highwirefundware' ]; then echo $legacyAppRepository; else echo $appRepository; fi").trim()
+        repository = sh(returnStdout: true, script: "if [ \$BRANCH_NAME == 'highwirefundware' ]; then echo \$legacyAppRepository; else echo \$appRepository; fi").trim()
       }
       stages {
         stage('Docker build') {
@@ -125,6 +129,7 @@ pipeline {
         }
       }
     }
+
     stage('Deploy to Test') {
       when {
         branch 'development'
@@ -172,55 +177,56 @@ pipeline {
         }
 
         stage('Deploy Services in Parallel') {
-          agent {
-            label 'parallel'
-          }
           parallel {
-            stage('DeployBacked') {
+            stage('DeployBackend') {
+              agent { label 'parallel' }
               steps {
-                  deployerDeploy('test')                                      
+                deployerDeploy('test')                                      
               }
               post {
-                  success {
-                      office365ConnectorSend message: "Deployed Test Backend Service ${env.JOB_NAME} - ${env.BUILD_NUMBER} - ${getAppVersionWithBranchName()}", status: "Success", color: "50df16", webhookUrl: backendWebhook
-                  }                    
+                success {
+                  office365ConnectorSend message: "Deployed Test Backend Service ${env.JOB_NAME} - ${env.BUILD_NUMBER} - ${getAppVersionWithBranchName()}", status: "Success", color: "50df16", webhookUrl: backendWebhook
+                }                    
               }
-          }
+            }
             stage('DeployGeneralWorker') {
+              agent { label 'parallel' }
               steps {
-                  deployerDeployWorker('test')                                      
+                deployerDeployWorker('test')                                      
               }
               post {
-                  success {
-                      office365ConnectorSend message: "Deployed Test General Worker ${env.JOB_NAME} - ${env.BUILD_NUMBER} - ${getAppVersionWithBranchName()}", status: "Success", color: "50df16", webhookUrl: backendWebhook
-                  }                    
+                success {
+                  office365ConnectorSend message: "Deployed Test General Worker ${env.JOB_NAME} - ${env.BUILD_NUMBER} - ${getAppVersionWithBranchName()}", status: "Success", color: "50df16", webhookUrl: backendWebhook
+                }                    
               }
-          }
+            }
             stage('DeployRules') {
+              agent { label 'parallel' }
               steps {
-                  deployerDeployRules('test')                                      
+                deployerDeployRules('test')                                      
               }
               post {
-                  success {
-                      office365ConnectorSend message: "Deployed Test Rules worker ${env.JOB_NAME} - ${env.BUILD_NUMBER} - ${getAppVersionWithBranchName()}", status: "Success", color: "50df16", webhookUrl: backendWebhook
-                  }                    
+                success {
+                  office365ConnectorSend message: "Deployed Test Rules Worker ${env.JOB_NAME} - ${env.BUILD_NUMBER} - ${getAppVersionWithBranchName()}", status: "Success", color: "50df16", webhookUrl: backendWebhook
+                }                    
               }
-          }
+            }
             stage('DeployCalcs') {
+              agent { label 'parallel' }
               steps {
-                  deployerDeployCalcs('test')                                      
+                deployerDeployCalcs('test')                                      
               }
               post {
-                  success {
-                      office365ConnectorSend message: "Deployed Test Calcs Worker ${env.JOB_NAME} - ${env.BUILD_NUMBER} - ${getAppVersionWithBranchName()}", status: "Success", color: "50df16", webhookUrl: backendWebhook
-                  }                    
+                success {
+                  office365ConnectorSend message: "Deployed Test Calcs Worker ${env.JOB_NAME} - ${env.BUILD_NUMBER} - ${getAppVersionWithBranchName()}", status: "Success", color: "50df16", webhookUrl: backendWebhook
+                }                    
               }
             }
           }
-          }
-          }
+        }
+      }
     }
-    
+
     stage('Deploy to Prod v1') {
       when {
         branch 'highwirefundware'
@@ -294,6 +300,7 @@ pipeline {
       }
     }
   }
+
   post {
     failure {
       script {
