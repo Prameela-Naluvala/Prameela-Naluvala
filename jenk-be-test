@@ -1,0 +1,320 @@
+devopsWebhook   = 'https://fundsaxis2.webhook.office.com/webhookb2/60d237ee-f3a2-4f04-adb7-27959c127730@c56018d0-aefb-49ba-adda-e4ddb4438bcf/IncomingWebhook/b44f555c2135422c81d3b9a2d7244d72/639cc0b8-ad5d-4c14-8940-211e40ef15c7'
+frontendWebhook = 'https://fundsaxis2.webhook.office.com/webhookb2/60d237ee-f3a2-4f04-adb7-27959c127730@c56018d0-aefb-49ba-adda-e4ddb4438bcf/IncomingWebhook/b44f555c2135422c81d3b9a2d7244d72/639cc0b8-ad5d-4c14-8940-211e40ef15c7'
+backendWebhook  = 'https://fundsaxis2.webhook.office.com/webhookb2/60d237ee-f3a2-4f04-adb7-27959c127730@c56018d0-aefb-49ba-adda-e4ddb4438bcf/IncomingWebhook/b44f555c2135422c81d3b9a2d7244d72/639cc0b8-ad5d-4c14-8940-211e40ef15c7'
+approvalrequestWebhook = 'https://fundsaxis2.webhook.office.com/webhookb2/60d237ee-f3a2-4f04-adb7-27959c127730@c56018d0-aefb-49ba-adda-e4ddb4438bcf/IncomingWebhook/4638f756543e4b6a9da685c955a4b555/a8db0d6a-19a5-4f60-8453-d3d41add906f'
+buildfailureWebhook = 'https://fundsaxis2.webhook.office.com/webhookb2/60d237ee-f3a2-4f04-adb7-27959c127730@c56018d0-aefb-49ba-adda-e4ddb4438bcf/IncomingWebhook/39637e2c0b3348349cb3fb4be37cc4fa/a8db0d6a-19a5-4f60-8453-d3d41add906f'
+region              = "eu-west-1"
+
+appRepository       = "606016206675.dkr.ecr.eu-west-1.amazonaws.com/fundsaxis/highwire"
+legacyAppRepository = "606016206675.dkr.ecr.eu-west-1.amazonaws.com/fundsaxis/highwire-fundware"
+deployerRepository  = "606016206675.dkr.ecr.eu-west-1.amazonaws.com/fundsaxis/jenkins-deployment:v2"
+
+appName             = "highwire"
+highwireUrl         = "https://highwire.stage.fundsaxis.org/"
+
+prodEnv             = 'prod'
+prodCluster         = 'prod'
+
+testEnv             = 'test'
+testCluster         = 'test'
+
+branchName = ""
+appVersion = ""
+
+def ecrLogin() {
+  sh "eval \$(aws ecr get-login --no-include-email --region=eu-west-1)"
+}
+
+def getBranchName() {
+  if( ! branchName ) {
+    branchName = env.BRANCH_NAME.toLowerCase().replaceAll("/", "__")
+  }
+  return branchName
+}
+
+def getAppVersion() {
+  if( ! appVersion ) {
+    appVersion = sh(returnStdout: true, script: 'git log -1 --pretty=\'format:%cd-%h\' --date=\'short\'').trim()
+  }
+  return appVersion
+}
+
+def getAppVersionWithBranchName() {
+  branchName = getBranchName()
+  appVersion = getAppVersion()
+  return "${appVersion}-${branchName}"
+}
+
+def deployerDeploy(name) {                
+                    ecrLogin()                    
+                    sh """
+                      docker run --rm ${deployerRepository} \
+                        ecs deploy ${name} ${name}-${appName} -t ${getAppVersionWithBranchName()} --region eu-west-1 --timeout 1800
+                    """                    
+}
+def deployerDeployWorker(name) {                
+                    ecrLogin()
+                    sh """
+                      docker run --rm ${deployerRepository} \
+                        ecs deploy ${name} ${name}-${appName}-worker -t ${getAppVersionWithBranchName()} --region eu-west-1 --timeout 1800
+                    """                                       
+}
+def deployerDeployRules(name) {                
+                    ecrLogin()                    
+                    sh """
+                      docker run --rm ${deployerRepository} \
+                        ecs deploy ${name} ${name}-${appName}-worker-rulesprocessing -t ${getAppVersionWithBranchName()} --region eu-west-1 --timeout 1800
+                    """                     
+}
+def deployerDeployCalcs(name) {                
+                    ecrLogin()                    
+                    sh """
+                      docker run --rm ${deployerRepository} \
+                        ecs deploy ${name} ${name}-${appName}-worker-calculations -t ${getAppVersionWithBranchName()} --region eu-west-1 --timeout 1800
+                    """
+}
+pipeline {
+  agent none
+  options {
+    disableConcurrentBuilds()
+    timeout(time: 2, unit: 'HOURS')
+    timestamps()
+    ansiColor('xterm')
+  }
+
+  parameters {
+    booleanParam(defaultValue: false, description: 'Wipe stage database?', name: 'wipeStageDatabase')
+  }
+
+  stages {    
+    stage('Build Container') {
+      when {
+        anyOf {
+          branch 'development'
+          branch 'highwirefundware'
+        }
+        beforeAgent true
+      }
+      agent {
+        label 'docker'
+      }
+      environment {
+        repository = sh(returnStdout: true, script: "if [ $BRANCH_NAME == 'highwirefundware' ]; then echo $legacyAppRepository; else echo $appRepository; fi").trim()
+      }
+      stages {
+        stage('Docker build') {
+          steps {
+            office365ConnectorSend message:"Build started ${env.JOB_NAME} - ${env.BUILD_NUMBER} (<${env.BUILD_URL}|Open>)", status: "Started", color: "999999", webhookUrl: devopsWebhook
+            sh "docker build . -t ${repository}:${getAppVersionWithBranchName()}"
+          }
+          post {
+            failure {
+              script {
+                if("${env.BRANCH_NAME}" == 'development' || "${env.BRANCH_NAME}" == 'highwirefundware') {
+                  office365ConnectorSend message: "Build Failed! ${env.JOB_NAME} - ${env.BUILD_NUMBER}", status: "Failure", color: "d00000", webhookUrl: buildfailureWebhook
+                }
+              }
+            }
+          }
+        }
+        stage('Docker push') {
+          steps {
+            ecrLogin()
+            sh "docker push ${repository}:${getAppVersionWithBranchName()}"
+          }
+        }
+      }
+    }
+    stage('Deploy to Test') {
+      when {
+        branch 'development'
+        beforeAgent true
+      }
+      agent {
+        label 'docker'
+      }
+
+      stages {
+        stage('Build Migrations docker image') {
+          steps {
+            dir("migrations") {
+              sh "docker build -t local/migrations ."
+            }
+          }
+        }
+
+        stage('Liquibase migration') {
+          steps {
+            sh """
+              docker run --rm --entrypoint='' \
+                -w /work/migrations \
+                -v \$(pwd)/migrations:/work/migrations \
+                -e AWS_REGION='${region}' \
+                -e AWS_ENV_PATH='/mgmt/jenkins/${testEnv}/${appName}/' \
+                  local/migrations \
+                    ./liquibaseMigration.sh test
+            """
+          }
+          post {
+            always {
+              dir('migrations') {
+                archiveArtifacts artifacts: 'migration-plan.sql', fingerprint: false
+              }
+            }
+            failure {
+              script {
+                if("${env.BRANCH_NAME}" == 'development') {
+                  office365ConnectorSend message: "Liquibase Migration for ${testEnv} Failed! ${env.JOB_NAME} - ${env.BUILD_NUMBER}", status: "Failure", color: "d00000", webhookUrl: buildfailureWebhook
+                }
+              }
+            }
+          }
+        }
+
+        stage('Deploy Services in Parallel') {
+          agent {
+            label 'parallel'
+          }
+          parallel {
+            stage('DeployBacked') {
+              steps {
+                  deployerDeploy('test')                                      
+              }
+              post {
+                  success {
+                      office365ConnectorSend message: "Deployed Test Backend Service ${env.JOB_NAME} - ${env.BUILD_NUMBER} - ${getAppVersionWithBranchName()}", status: "Success", color: "50df16", webhookUrl: backendWebhook
+                  }                    
+              }
+          }
+            stage('DeployGeneralWorker') {
+              steps {
+                  deployerDeployWorker('test')                                      
+              }
+              post {
+                  success {
+                      office365ConnectorSend message: "Deployed Test General Worker ${env.JOB_NAME} - ${env.BUILD_NUMBER} - ${getAppVersionWithBranchName()}", status: "Success", color: "50df16", webhookUrl: backendWebhook
+                  }                    
+              }
+          }
+            stage('DeployRules') {
+              steps {
+                  deployerDeployRules('test')                                      
+              }
+              post {
+                  success {
+                      office365ConnectorSend message: "Deployed Test Rules worker ${env.JOB_NAME} - ${env.BUILD_NUMBER} - ${getAppVersionWithBranchName()}", status: "Success", color: "50df16", webhookUrl: backendWebhook
+                  }                    
+              }
+          }
+            stage('DeployCalcs') {
+              steps {
+                  deployerDeployCalcs('test')                                      
+              }
+              post {
+                  success {
+                      office365ConnectorSend message: "Deployed Test Calcs Worker ${env.JOB_NAME} - ${env.BUILD_NUMBER} - ${getAppVersionWithBranchName()}", status: "Success", color: "50df16", webhookUrl: backendWebhook
+                  }                    
+              }
+            }
+          }
+          }
+          }
+    }
+    
+    stage('Deploy to Prod v1') {
+      when {
+        branch 'highwirefundware'
+        beforeAgent true
+      }
+      agent {
+        label 'docker'
+      }
+
+      stages {
+        stage('Build Migrations docker image') {
+          steps {
+            dir("migrations") {
+              sh "docker build -t local/migrations ."
+            }
+          }
+        }
+
+        stage('Liquibase migration') {
+          steps {
+            sh """
+              docker run --rm --entrypoint='' \
+                -w /work/migrations \
+                -v \$(pwd)/migrations:/work/migrations \
+                -e AWS_REGION='${region}' \
+                -e AWS_ENV_PATH='/mgmt/jenkins/${prodEnv}/${appName}/' \
+                  local/migrations \
+                    ./liquibaseMigration.sh prod
+            """
+          }
+          post {
+            always {
+              dir('migrations') {
+                archiveArtifacts artifacts: 'migration-plan.sql', fingerprint: false
+              }
+            }
+            failure {
+              script {
+                if("${env.BRANCH_NAME}" == 'development' || "${env.BRANCH_NAME}" == 'highwirefundware') {
+                  office365ConnectorSend message: "Liquibase Migration for ${prodEnv} Failed! ${env.JOB_NAME} - ${env.BUILD_NUMBER}", status: "Failure", color: "d00000", webhookUrl: buildfailureWebhook
+                }
+              }
+            }
+          }
+        }
+
+        stage('Deploy') {
+          steps {
+            ecrLogin()
+            sh """
+              docker run --rm ${deployerRepository} \
+                ecs deploy --region=${region} --cluster=${prodCluster} --service=${prodEnv}-${appName}-worker --image=${legacyAppRepository} --tag=${getAppVersionWithBranchName()}
+            """
+            sh """
+              docker run --rm ${deployerRepository} \
+                ecs-deploy --region=${region} --cluster=${prodCluster} --service=${prodEnv}-${appName} --image=${legacyAppRepository} --tag=${getAppVersionWithBranchName()}
+            """
+          }
+          post {
+            success {
+              office365ConnectorSend message: "Deployed Prod v1 ${env.JOB_NAME} - ${env.BUILD_NUMBER} - ${getAppVersionWithBranchName()}", status: "Success", color: "50df16", webhookUrl: backendWebhook
+            }
+            unstable {
+              office365ConnectorSend message: "Deployed Prod v1 ${env.JOB_NAME} - ${env.BUILD_NUMBER} - ${getAppVersionWithBranchName()}", status: "Unstable", color: "ffcc00", webhookUrl: backendWebhook
+            }
+            aborted {
+              office365ConnectorSend message: "Could not deploy Prod v1 ${env.JOB_NAME} - ${env.BUILD_NUMBER} - ${getAppVersionWithBranchName()}", status: "Aborted", color: "999999", webhookUrl: buildfailureWebhook
+            }
+          }
+        }
+      }
+    }
+  }
+  post {
+    failure {
+      script {
+        if("${env.BRANCH_NAME}" == 'development' || "${env.BRANCH_NAME}" == 'highwirefundware') {
+          office365ConnectorSend message: "CI Pipeline Failed! ${env.JOB_NAME} - ${env.BUILD_NUMBER}", status: "Failure", color: "d00000", webhookUrl: buildfailureWebhook
+        }
+      }
+    }
+    unstable {
+      script {
+        if("${env.BRANCH_NAME}" == 'development' || "${env.BRANCH_NAME}" == 'highwirefundware') {
+          office365ConnectorSend message: "CI Pipeline is unstable. ${env.JOB_NAME} - ${env.BUILD_NUMBER}", status: "Unstable", color: "ffcc00", webhookUrl: devopsWebhook
+        }
+      }
+    }
+    aborted {
+      script {
+        if("${env.BRANCH_NAME}" == 'development' || "${env.BRANCH_NAME}" == 'highwirefundware') {
+          office365ConnectorSend message: "CI Pipeline Aborted! ${env.JOB_NAME} - ${env.BUILD_NUMBER}", status: "Aborted", color: "999999", webhookUrl: buildfailureWebhook
+        }
+      }
+    }
+  }
+}
