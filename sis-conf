@@ -1,0 +1,26 @@
+    },
+
+    // Mapping for the logout redirect
+    logout: {
+        // Replace with key-value pairs so that the key is Sisense DNS and the value is the destination SSO logout handler
+        // You can use up to one parameter
+        //'analytics-linux.transition.fundsaxis.org': 'https://highwire.demo.fundsaxis.org/#logout',
+    },
+
+    // In case the login sso handler is determine by a URL parameter, state the URL name
+    loginURLParameter: ['ssorouter', 'data'],
+
+    // In case the login sso handler is determine by a URL parameter,
+    // state parameter value as the key and the redirect address as the value.
+    loginParameterMapping: {
+        'Highwire_Test_LFrOWWW5nfr1RmQwJj1OUYo9awH8Sn': 'https://highwire.test.fundsaxis.org/#/sisense/sso',
+        'Highwire_Stage_VL3K0Xlnl2vLH5AFB89iHYczDA4XGL': 'https://highwire.stage.fundsaxis.org/#/sisense/sso',
+    },
+
+    logoutParameterMapping: {
+        'Highwire_Test_LFrOWWW5nfr1RmQwJj1OUYo9awH8Sn': 'https://highwire.test.fundsaxis.org/sso/logout',               'Highwire_Stage_VL3K0Xlnl2vLH5AFB89iHYczDA4XGL': 'https://highwire.stage.fundsaxis.org/sso/logout',
+    },
+};
+
+module.exports = config;
+                                                                                              35,0-1       
