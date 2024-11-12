@@ -1,0 +1,339 @@
+devopsWebhook   = 'https://fundsaxis2.webhook.office.com/webhookb2/60d237ee-f3a2-4f04-adb7-27959c127730@c56018d0-aefb-49ba-adda-e4ddb4438bcf/IncomingWebhook/b44f555c2135422c81d3b9a2d7244d72/639cc0b8-ad5d-4c14-8940-211e40ef15c7'
+frontendWebhook = 'https://fundsaxis2.webhook.office.com/webhookb2/60d237ee-f3a2-4f04-adb7-27959c127730@c56018d0-aefb-49ba-adda-e4ddb4438bcf/IncomingWebhook/b44f555c2135422c81d3b9a2d7244d72/639cc0b8-ad5d-4c14-8940-211e40ef15c7'
+backendWebhook  = 'https://fundsaxis2.webhook.office.com/webhookb2/60d237ee-f3a2-4f04-adb7-27959c127730@c56018d0-aefb-49ba-adda-e4ddb4438bcf/IncomingWebhook/b44f555c2135422c81d3b9a2d7244d72/639cc0b8-ad5d-4c14-8940-211e40ef15c7'
+approvalrequestWebhook = 'https://fundsaxis2.webhook.office.com/webhookb2/60d237ee-f3a2-4f04-adb7-27959c127730@c56018d0-aefb-49ba-adda-e4ddb4438bcf/IncomingWebhook/4638f756543e4b6a9da685c955a4b555/a8db0d6a-19a5-4f60-8453-d3d41add906f'
+buildfailureWebhook = 'https://fundsaxis2.webhook.office.com/webhookb2/60d237ee-f3a2-4f04-adb7-27959c127730@c56018d0-aefb-49ba-adda-e4ddb4438bcf/IncomingWebhook/39637e2c0b3348349cb3fb4be37cc4fa/a8db0d6a-19a5-4f60-8453-d3d41add906f'
+region              = "eu-west-1"
+
+repository       = "606016206675.dkr.ecr.eu-west-1.amazonaws.com/fundsaxis/highwire"
+deployerRepository  = "606016206675.dkr.ecr.eu-west-1.amazonaws.com/fundsaxis/jenkins-deployment:v2"
+appRepository  = "606016206675.dkr.ecr.eu-west-1.amazonaws.com/fundsaxis/highwire"
+
+appName             = "highwire"
+highwireUrl         = "https://highwire.stage.fundsaxis.org/"
+
+stageEnv            = 'stage'
+stageCluster        = 'stage'
+
+
+branchName = ""
+appVersion = ""
+
+def ecrLogin() {
+    sh "eval \$(aws ecr get-login --no-include-email --region=eu-west-1)"    
+}
+
+def getBranchName() {
+  if( ! branchName ) {
+    branchName = env.BRANCH_NAME.toLowerCase().replaceAll("/", "__")
+  }
+  return branchName
+}
+
+def getAppVersion() {
+  if( ! appVersion ) {
+    appVersion = sh(returnStdout: true, script: 'git log -1 --pretty=\'format:%cd-%h\' --date=\'short\'').trim()
+  }
+  return appVersion
+}
+
+def getAppVersionWithBranchName() {
+  branchName = getBranchName()
+  appVersion = getAppVersion()
+  return "${appVersion}-${branchName}"
+}
+
+def buildMigrationsdockerImage() {
+  dir("migrations") {
+        sh "docker build -t local/migrations ."
+  }
+}
+
+def namedLiquibaseMigration(name) {  
+  sh """
+    docker run --rm --entrypoint='' \
+      -w /work/migrations \
+      -v \$(pwd)/migrations:/work/migrations \
+      -e AWS_REGION='${region}' \
+      -e AWS_ENV_PATH='/mgmt/jenkins/${name}/${appName}/' \
+        local/migrations \
+          ./liquibaseMigration.sh ${name}
+  """
+}
+
+
+def deployerDeploy(name) {                
+                    ecrLogin()
+                    sh """
+                      docker run --rm ${deployerRepository} \
+                        ecs deploy ${name} ${name}-${appName}-worker -t ${getAppVersionWithBranchName()} --region eu-west-1 --timeout 1800
+                    """
+                    sh """
+                      docker run --rm ${deployerRepository} \
+                        ecs deploy ${name} ${name}-${appName} -t ${getAppVersionWithBranchName()} --region eu-west-1 --timeout 1800
+                    """
+}
+def deployerDeployRules(name) {                
+                    ecrLogin()                    
+                    sh """
+                      docker run --rm ${deployerRepository} \
+                        ecs deploy ${name} ${name}-${appName}-worker-rulesprocessing -t ${getAppVersionWithBranchName()} --region eu-west-1 --timeout 1800
+                    """                    
+}
+def deployerDeployCalcs(name) {                
+                    ecrLogin()                    
+                    sh """
+                      docker run --rm ${deployerRepository} \
+                        ecs deploy ${name} ${name}-${appName}-worker-calculations -t ${getAppVersionWithBranchName()} --region eu-west-1 --timeout 1800
+                    """
+}
+
+pipeline {
+  agent none
+  options {
+    disableConcurrentBuilds()
+    timeout(time: 12, unit: 'HOURS')
+    timestamps()
+    ansiColor('xterm')
+  } 
+  environment {
+    wipeStageDatabase = false
+  } 
+  stages {
+    stage('Prepare') {
+      when {
+         branch 'development'
+      }
+      steps {
+        script {
+          properties([
+            parameters([
+               booleanParam(defaultValue: false, description: 'Wipe stage database?', name: 'wipeStageDatabase')               
+            ])
+          ])
+        }
+      }
+    }
+    stage('Unit tests') {
+      when {       
+          branch 'development'    
+          beforeAgent true
+      }
+      agent {
+        label 'docker'
+      }
+      options {
+            timeout(time: 2, unit: 'HOURS')
+        }
+      steps {
+        sh "docker build -f Dockerfile.maven -t local/maven ."
+        sh "docker run --name maven local/maven mvn test"
+      }
+      post {
+        always {
+          sh "docker cp maven:/work/target highwire-unit-tests || exit 0"
+          sh "docker rm maven"
+          archiveArtifacts artifacts: 'highwire-unit-tests/**', fingerprint: false
+          junit 'highwire-unit-tests/surefire-reports/*.xml'
+        }
+        failure {
+          script {
+            if("${env.BRANCH_NAME}" == 'master' || "${env.BRANCH_NAME}" == 'development' || "${env.BRANCH_NAME}" == 'release') {
+              office365ConnectorSend message: "Unit Tests Failed! ${env.JOB_NAME} - ${env.BUILD_NUMBER}", status: "Failure", color: "d00000", webhookUrl: buildfailureWebhook
+            }
+          }
+        }
+      }
+    }
+    stage('Build Container') {
+      when {
+        anyOf {
+          branch 'master'
+          branch 'development'
+          branch 'release'
+        }
+        beforeAgent true
+      }
+      agent {
+        label 'docker'
+      }      
+      stages {
+        stage('Docker build') {
+          steps {
+            office365ConnectorSend message:"Build started ${env.JOB_NAME} - ${env.BUILD_NUMBER} (<${env.BUILD_URL}|Open>)", status: "Started", color: "999999", webhookUrl: devopsWebhook
+            sh "docker build . -t ${repository}:${getAppVersionWithBranchName()}"
+          }
+          post {
+            failure {
+              script {
+                if("${env.BRANCH_NAME}" == 'master' || "${env.BRANCH_NAME}" == 'development' || "${env.BRANCH_NAME}" == 'release') {
+                  office365ConnectorSend message: "Build Failed! ${env.JOB_NAME} - ${env.BUILD_NUMBER}", status: "Failure", color: "d00000", webhookUrl: buildfailureWebhook
+                }
+              }
+            }
+          }
+        }
+        stage('Docker push') {
+          steps {
+            ecrLogin()
+            sh "docker push ${repository}:${getAppVersionWithBranchName()}"
+          }
+        }
+      }
+    }
+    stage('Deploy to Test') {
+      when {
+        branch 'development'
+        beforeAgent true
+      }
+      agent {
+        label 'docker'
+      }
+      stages {        
+        stage('Build Migrations docker image') {
+          steps {
+            buildMigrationsdockerImage()
+          }
+        }
+        stage('Liquibase migration') {
+          steps {
+            namedLiquibaseMigration('test')
+          }
+          post {
+            always {
+              dir('migrations') {
+                archiveArtifacts artifacts: 'migration-plan.sql', fingerprint: false
+              }
+            }
+            failure {
+              script {
+                if("${env.BRANCH_NAME}" == 'development') {
+                  office365ConnectorSend message: "Liquibase Migration for ${testEnv} Failed! ${env.JOB_NAME} - ${env.BUILD_NUMBER}", status: "Failure", color: "d00000", webhookUrl: buildfailureWebhook
+                }
+              }
+            }
+          }
+        }
+        stage('Deploy') {
+          steps {
+            deployerDeploy('test')
+          }
+          post {
+            success {
+              office365ConnectorSend message: "Deployed Test ${env.JOB_NAME} - ${env.BUILD_NUMBER} - ${getAppVersionWithBranchName()}", status: "Success", color: "50df16", webhookUrl: backendWebhook
+            }
+           
+          }
+        }
+        stage('DeployRules') {
+          steps {
+              deployerDeployRules('test')                                      
+          }
+          post {
+              success {
+                  office365ConnectorSend message: "Deployed Test Rules worker ${env.JOB_NAME} - ${env.BUILD_NUMBER} - ${getAppVersion()}", status: "Success", color: "50df16", webhookUrl: backendWebhook
+              }                    
+          }
+      }
+        stage('DeployCalcs') {
+          steps {
+              deployerDeployCalcs('test')                                      
+          }
+          post {
+              success {
+                  office365ConnectorSend message: "Deployed Test Calcs Worker ${env.JOB_NAME} - ${env.BUILD_NUMBER} - ${getAppVersion()}", status: "Success", color: "50df16", webhookUrl: backendWebhook
+              }                    
+          }
+        }
+      }
+    }
+    stage('Deploy to Stage') {
+      when {
+        branch 'development'
+        beforeAgent true
+      }
+      agent {
+        label 'docker'
+      }
+      
+      stages {      
+        
+        stage('Build Migrations docker image') {
+          steps {
+            buildMigrationsdockerImage()
+          }
+        }
+        stage('Database Wipe') {
+          when {
+            expression { return params.wipeStageDatabase }
+            beforeAgent true
+          }
+          steps {
+            sh """
+              docker run --rm --entrypoint='' \
+                -w /work \
+                -v \$(pwd)/wipeStageDB.sh:/work/wipeStageDB.sh \
+                -e AWS_REGION='${region}' \
+                -e AWS_ENV_PATH='/mgmt/jenkins/${stageEnv}/${appName}/' \
+                  local/migrations \
+                    ./wipeStageDB.sh
+            """
+          }
+        }
+        stage('Liquibase migration') {
+          steps {
+            namedLiquibaseMigration('stage')
+          }
+          post {
+            always {
+              dir('migrations') {
+                archiveArtifacts artifacts: 'migration-plan.sql', fingerprint: false
+              }
+            }
+            failure {
+              script {
+                if("${env.BRANCH_NAME}" == 'development') {
+                  office365ConnectorSend message: "Liquibase Migration for ${stageEnv} Failed! ${env.JOB_NAME} - ${env.BUILD_NUMBER}", status: "Failure", color: "d00000", webhookUrl: buildfailureWebhook
+                }
+              }
+            }
+          }
+        }
+        stage('Deploy') {
+          steps {
+            deployerDeploy('stage')
+          }
+          post {
+            success {
+              office365ConnectorSend message: "Deployed Stage ${env.JOB_NAME} - ${env.BUILD_NUMBER} - ${getAppVersionWithBranchName()}", status: "Success", color: "50df16", webhookUrl: backendWebhook
+            }
+            
+          }
+        }
+      }
+    }      
+  }
+  post {
+    failure {
+      script {
+        if("${env.BRANCH_NAME}" == 'master' || "${env.BRANCH_NAME}" == 'development' || "${env.BRANCH_NAME}" == 'release') {
+          office365ConnectorSend message: "CI Pipeline Failed! ${env.JOB_NAME} - ${env.BUILD_NUMBER}", status: "Failure", color: "d00000", webhookUrl: buildfailureWebhook
+        }
+      }
+    }
+    unstable {
+      script {
+        if("${env.BRANCH_NAME}" == 'master' || "${env.BRANCH_NAME}" == 'development' || "${env.BRANCH_NAME}" == 'release') {
+          office365ConnectorSend message: "CI Pipeline is unstable. ${env.JOB_NAME} - ${env.BUILD_NUMBER}", status: "Unstable", color: "ffcc00", webhookUrl: devopsWebhook
+        }
+      }
+    }
+    aborted {
+      script {
+        if("${env.BRANCH_NAME}" == 'master' || "${env.BRANCH_NAME}" == 'development' || "${env.BRANCH_NAME}" == 'release') {
+          office365ConnectorSend message: "CI Pipeline Aborted! ${env.JOB_NAME} - ${env.BUILD_NUMBER}", status: "Aborted", color: "999999", webhookUrl: buildfailureWebhook
+        }
+      }
+    }
+  }
+}
