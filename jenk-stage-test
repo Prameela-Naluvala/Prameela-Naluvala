@@ -15,6 +15,77 @@ highwireUrl         = "https://highwire.stage.fundsaxis.org/"
 stageEnv            = 'stage'
 stageCluster        = 'stage'
 
+prodEnv             = 'prod'
+prodCluster         = 'prod'
+
+prodv2Env           = 'prod-v2'
+prodv2Cluster       = 'prod'
+
+evelynEnv          = 'evelyn'
+evelynCluster      = 'evelyn'
+
+testEnv             = 'test'
+testCluster         = 'test'
+
+transitionEnv       = 'transition'
+transitionCluster   = 'transition'
+
+equitytrusteesEnv   = 'equitytrustees'
+equitytrusteesCluster  = 'equitytrustees'
+
+intertrustEnv      = 'intertrust'
+intertrustCluster  = 'intertrust'
+
+thesisEnv          = 'thesis'
+thesisCluster      = 'thesis'
+
+yealandEnv          = 'yealand'
+yealandCluster      = 'yealand'
+
+phoenixEnv             = 'phoenix'
+phoenixCluster         = 'phoenix'
+
+handelsbankenEnv          = 'handelsbanken'
+handelsbankenCluster      = 'handelsbanken'
+
+marlboroughEnv          = 'marlborough'
+marlboroughCluster      = 'marlborough'
+
+canaccordEnv          = 'canaccord'
+canaccordCluster      = 'canaccord'
+
+tbaileyEnv          = 'tbailey'
+tbaileyCluster      = 'tbailey'
+
+wayEnv          = 'way'
+wayCluster      = 'way'
+
+bailliegiffordEnv          = 'bailliegifford'
+bailliegiffordCluster      = 'bailliegifford'
+
+onefundEnv          = 'onefund'
+onefundCluster      = 'onefund'
+
+maitlandEnv          = 'maitland'
+maitlandCluster      = 'maitland'
+
+halEnv          = 'hal'
+halCluster      = 'hal'
+
+globalEnv          = 'global'
+globalCluster      = 'global'
+
+disclosuresEnv          = 'disclosures'
+disclosuresCluster      = 'disclosures'
+
+demoEnv          = 'demo'
+demoCluster      = 'demo'
+
+caceisEnv          = 'caceis'
+caceisCluster      = 'caceis'
+
+carneEnv          = 'carne'
+carneCluster      = 'carne'
 
 branchName = ""
 appVersion = ""
@@ -61,6 +132,17 @@ def namedLiquibaseMigration(name) {
   """
 }
 
+def liquibaseMigration(name) {  
+  sh """
+    docker run --rm --entrypoint='' \
+      -w /work/migrations \
+      -v \$(pwd)/migrations:/work/migrations \
+      -e AWS_REGION='${region}' \
+      -e AWS_ENV_PATH='/mgmt/jenkins/${name}/${appName}/' \
+        local/migrations \
+          ./liquibaseMigration.sh prod
+  """
+}
 
 def deployerDeploy(name) {                
                     ecrLogin()
@@ -108,43 +190,15 @@ pipeline {
         script {
           properties([
             parameters([
-               booleanParam(defaultValue: false, description: 'Wipe stage database?', name: 'wipeStageDatabase')               
+               booleanParam(name: 'deployToTest', defaultValue: false, description: 'Deploy to Test environment?')
+               booleanParam(name: 'deployToStage', defaultValue: false, description: 'Deploy to Stage environment?')
+               booleanParam(defaultValue: false, description: 'Wipe stage database?', name: 'wipeStageDatabase')
+                              
             ])
           ])
         }
       }
-    }
-    stage('Unit tests') {
-      when {       
-          branch 'development'    
-          beforeAgent true
-      }
-      agent {
-        label 'docker'
-      }
-      options {
-            timeout(time: 2, unit: 'HOURS')
-        }
-      steps {
-        sh "docker build -f Dockerfile.maven -t local/maven ."
-        sh "docker run --name maven local/maven mvn test"
-      }
-      post {
-        always {
-          sh "docker cp maven:/work/target highwire-unit-tests || exit 0"
-          sh "docker rm maven"
-          archiveArtifacts artifacts: 'highwire-unit-tests/**', fingerprint: false
-          junit 'highwire-unit-tests/surefire-reports/*.xml'
-        }
-        failure {
-          script {
-            if("${env.BRANCH_NAME}" == 'master' || "${env.BRANCH_NAME}" == 'development' || "${env.BRANCH_NAME}" == 'release') {
-              office365ConnectorSend message: "Unit Tests Failed! ${env.JOB_NAME} - ${env.BUILD_NUMBER}", status: "Failure", color: "d00000", webhookUrl: buildfailureWebhook
-            }
-          }
-        }
-      }
-    }
+    }    
     stage('Build Container') {
       when {
         anyOf {
@@ -185,6 +239,7 @@ pipeline {
       when {
         branch 'development'
         beforeAgent true
+        expression { return params.deployToTest }
       }
       agent {
         label 'docker'
@@ -251,6 +306,7 @@ pipeline {
       when {
         branch 'development'
         beforeAgent true
+        expression { return params.deployToStage }
       }
       agent {
         label 'docker'
@@ -311,7 +367,38 @@ pipeline {
           }
         }
       }
-    }      
+    }
+    stage('Unit tests') {
+      when {       
+          branch 'development'    
+          beforeAgent true
+      }
+      agent {
+        label 'docker'
+      }
+      options {
+            timeout(time: 2, unit: 'HOURS')
+        }
+      steps {
+        sh "docker build -f Dockerfile.maven -t local/maven ."
+        sh "docker run --name maven local/maven mvn test"
+      }
+      post {
+        always {
+          sh "docker cp maven:/work/target highwire-unit-tests || exit 0"
+          sh "docker rm maven"
+          archiveArtifacts artifacts: 'highwire-unit-tests/**', fingerprint: false
+          junit 'highwire-unit-tests/surefire-reports/*.xml'
+        }
+        failure {
+          script {
+            if("${env.BRANCH_NAME}" == 'master' || "${env.BRANCH_NAME}" == 'development' || "${env.BRANCH_NAME}" == 'release') {
+              office365ConnectorSend message: "Unit Tests Failed! ${env.JOB_NAME} - ${env.BUILD_NUMBER}", status: "Failure", color: "d00000", webhookUrl: buildfailureWebhook
+            }
+          }
+        }
+      }
+    }                    
   }
   post {
     failure {
