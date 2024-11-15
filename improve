@@ -1,0 +1,41 @@
+
+
+Some of the queries / improvements: 
+•	When is the PR Build Trigger? 
+PR build is triggered on FE when a PR is raised(not branch master, development, release)
+•	Do we need a PR build? No PR is required on FE 
+For quality code, PR builds are required. Hope it would consume time but better to have
+Example from 1 PR build
+ 
+
+•	What is the interval for scanning? Which Projects have scan? 
+         highwire, highwire-client, xmlvalidator, ai-assistants has 5mins interval
+in highwire scan required only on dev
+         highwire-var -10mins
+         infrastructure-ami-bakery = 1min
+         infrastructure-v2 = 2mins
+        stats pipelines- 3mins
+
+Note: highwire-client build is taking long time to index and trigger build automatically –To check
+
+•	Do we need them at all ? Lets review each branch / project and finalize 
+these scans are required to detect new branches, changes,especially in multibranch pipelines and trigger automatic builds on commits without needing manual inervention.
+
+but we can increase the scan interval on some projects where we don't push the changes often.
+
+•	What parameters can be added to simplify? Lets review all project pipeline 
+on BE we can add parameter to deploy stage, test and preprod
+unit tests should go after test, stage deployment
+release demo, preprod(parameter -- only preprod),   beta release envs (aaproval stage before beta release envs)
+•	What are pipeline other projects? Any improvements required there ? 
+stats pipelines require some improvements
+Highwire pipelines too require improvements - adding parameters, adjusting deployment stages with branches
+stats-client – use new deployer
+
+•	We have new environment – PreProd – What about deployment to this ? Branch ? etc 
+all branches or release??
+•	Do we need automated triggering of builds. Yes
+For prod deployment shall we have a separate pipeline??
+
+
+
