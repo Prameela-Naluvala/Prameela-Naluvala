@@ -1,0 +1,81 @@
+Document Title: Review and Recommendations for Build and Pipeline Processes
+1. Pull Request (PR) Builds
+Triggering Mechanism:
+PR builds are triggered on the Front-End (FE) when a PR is raised, excluding branches such as master, development, and release.
+
+Requirement for PR Builds:
+While PR builds are not mandatory for the FE, they provide significant benefits by ensuring code quality. Despite the additional time consumption, they play a crucial role in maintaining robust development pipelines.
+
+Conclusion after Discussion:
+PR builds are not required as the same tests are executed during stage testing.
+
+2. Scanning Intervals and Projects
+Current Scanning Intervals:
+
+Project	Scanning Interval	Notes
+highwire	5 minutes	Scanning required only on dev
+highwire-client	5 minutes	Long indexing time, needs review
+xmlvalidator	5 minutes	
+ai-assistants	5 minutes	
+highwire-var	10 minutes	
+infrastructure-ami-bakery	1 minute	
+infrastructure-v2	2 minutes	
+stats pipelines	3 minutes	
+Review Notes:
+
+Projects with less frequent changes could have their scan intervals increased to optimize resources.
+Conclusion after Discussion:
+
+Review if scanning can be removed for projects where changes are infrequent.
+Scans should focus on active projects.
+Issue Identified:
+
+The highwire-client project takes a significant amount of time to index and trigger builds automatically.
+Solution:
+
+The long indexing time is caused by scanning all PR branches and active branches. After removing PR builds, this issue will be resolved.
+3. Scanning Necessity
+Purpose of Scans:
+
+Detect new branches.
+Identify code changes.
+Update multibranch pipelines automatically.
+Recommendation:
+
+Scans are essential for triggering automatic builds on commits without manual intervention.
+Adjust scan intervals based on project activity to optimize performance.
+4. Pipeline Parameters
+Recommendations for Back-End (BE) Projects:
+Add parameters for the following stages:
+Deployment:
+Test.
+Stage.
+Preprod.
+Unit Tests:
+Should follow the Test and Stage deployment processes.
+Release Stages:
+Demo.
+Preprod (parameterized).
+Beta release environments (introduce an approval stage before deployment to beta environments).
+5. Pipeline Improvements
+Stats Pipelines:
+
+Evaluate and improve deployment stages.
+Highwire Pipelines:
+
+Add parameters to streamline the deployment process.
+Adjust deployment stages to align with branching strategies.
+Stats-Client:
+
+Transition to a new deployment system for improved efficiency.
+6. New Environment: PreProd
+Deployment Approach:
+Define whether all branches or only release branches should be deployed to the PreProd environment.
+7. Automated Build Triggers
+Necessity of Automation:
+
+Automated triggers are critical for ensuring consistent and timely builds.
+Prod Deployment Pipeline:
+
+Consider introducing a separate pipeline for production deployments to enhance process clarity and reduce risks.
+This document provides a structured overview of the key recommendations and action items for improving build and pipeline processes. Please let me know if additional details or revisions are needed.
