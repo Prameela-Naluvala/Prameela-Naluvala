@@ -1,0 +1,84 @@
+FROM mcr.microsoft.com/dotnet/core/sdk:3.1 AS build-env
+WORKDIR /src
+
+COPY DocumentService.sln ./
+COPY DocumentService/*.csproj ./DocumentService/
+COPY DocumentService.DataTypes/*.csproj ./DocumentService.DataTypes/
+COPY DocumentService.Mapper/*.csproj ./DocumentService.Mapper/
+COPY DocumentService.Test/*.csproj ./DocumentService.Test/
+COPY DocumentService.Utility/*.csproj ./DocumentService.Utility/
+
+RUN dotnet restore
+
+# Copy everything else and build
+COPY . ./
+
+WORKDIR /src/DocumentService.DataTypes
+RUN dotnet build -c Release -o /app
+
+WORKDIR /src/DocumentService.Mapper
+RUN dotnet build -c Release -o /app
+
+WORKDIR /src/DocumentService.Test
+RUN dotnet build -c Release -o /app
+
+WORKDIR /src/DocumentService.Utility
+RUN dotnet build -c Release -o /app
+
+WORKDIR /src/DocumentService
+RUN dotnet build -c Release -o /app
+
+FROM build-env AS publish
+RUN dotnet publish -c Release -o /app
+
+# build runtime image
+FROM mcr.microsoft.com/dotnet/core/aspnet:3.1
+WORKDIR /app
+COPY --from=publish /app .
+CMD ASPNETCORE_URLS=http://*:$PORT dotnet DocumentService.dll
+
+
+#Font Config
+RUN echo "deb http://deb.debian.org/debian buster contrib non-free" > /etc/apt/sources.list.d/contrib.list
+RUN apt update
+RUN apt install -y fontconfig ttf-mscorefonts-installer
+RUN cp /app/Fonts/* /usr/share/fonts/
+RUN fc-cache -f -v
+
+
+
+
+
+
+
+
+
+
+================
+ #16 [build-env  9/20] RUN dotnet restore
+
+[2024-11-26T07:55:33.776Z] #16 3.069   Determining projects to restore...
+
+[2024-11-26T07:55:40.342Z] #16 8.715   Restored /src/DocumentService/DocumentService.csproj (in 5.16 sec).
+
+[2024-11-26T07:55:40.342Z] #16 8.716   Restored /src/DocumentService.Test/DocumentService.Test.csproj (in 5.16 sec).
+
+[2024-11-26T07:55:48.454Z] #16 17.19   Restored /src/DocumentService.Utility/DocumentService.Utility.csproj (in 8.46 sec).
+
+[2024-11-26T07:55:48.454Z] #16 17.73   Restored /src/DocumentService/DocumentService.csproj (in 8.98 sec).
+
+[2024-11-26T07:55:48.454Z] #16 17.74   Restored /src/DocumentService.Mapper/DocumentService.Mapper.csproj (in 7 ms).
+
+[2024-11-26T07:55:48.454Z] #16 17.74   Restored /src/DocumentService.DataTypes/DocumentService.DataTypes.csproj (in 4 ms).
+
+[2024-11-26T07:55:48.713Z] #16 18.23 /src/DocumentService.Test/DocumentService.Test.csproj : error NU1605: Detected package downgrade: Newtonsoft.Json from 13.0.1 to 12.0.3. Reference the package directly from the project to select a different version.  [/src/DocumentService.sln]
+
+[2024-11-26T07:55:48.713Z] #16 18.23 /src/DocumentService.Test/DocumentService.Test.csproj : error NU1605:  DocumentService.Test -> DocumentService -> Aspose.Words 24.11.1 -> Newtonsoft.Json (>= 13.0.1)  [/src/DocumentService.sln]
+
+[2024-11-26T07:55:48.713Z] #16 18.23 /src/DocumentService.Test/DocumentService.Test.csproj : error NU1605:  DocumentService.Test -> Newtonsoft.Json (>= 12.0.3) [/src/DocumentService.sln]
+
+[2024-11-26T07:55:48.713Z] #16 18.27   Failed to restore /src/DocumentService.Test/DocumentService.Test.csproj (in 1.07 sec).
+
+[2024-11-26T07:55:51.998Z] #16 ERROR: process "/bin/sh -c dotnet restore" did not complete successfully: exit code: 1
+
+[2024-11-26T07:55:51.998Z] ------
