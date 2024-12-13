@@ -1,0 +1,41 @@
+import psycopg2
+import boto3
+
+def get_parameter(name, decrypt=True):
+    ssm = boto3.client("ssm", region_name="your-region")
+    response = ssm.get_parameter(Name=name, WithDecryption=decrypt)
+    return response["Parameter"]["Value"]
+
+# Fetch credentials
+db_username = get_parameter("/test/jenkins/highwire/db-username")
+db_password = get_parameter("/test/jenkins/highwire/db-password")
+
+DB_CONFIGS = [
+    {"host": "test-rds-endpoint", "database": "db_name", "user": db_username, "password": db_password},
+    {"host": "stage-rds-endpoint", "database": "db_name", "user": db_username, "password": db_password},
+    {"host": "prod-rds-endpoint", "database": "db_name", "user": db_username, "password": db_password},
+    {"host": "transition-rds-endpoint", "database": "db_name", "user": db_username, "password": db_password},
+]
+
+TRUNCATE_QUERIES = [
+    "TRUNCATE TABLE public.batch_job_execution CASCADE;",
+    "TRUNCATE TABLE public.batch_job_execution_context CASCADE;",
+    "TRUNCATE TABLE public.batch_job_execution_params CASCADE;",
+    "TRUNCATE TABLE public.batch_job_instance CASCADE;",
+    "TRUNCATE TABLE public.batch_step_execution CASCADE;",
+    "TRUNCATE TABLE public.batch_step_execution_context CASCADE;"
+]
+
+def lambda_handler(event, context):
+    for config in DB_CONFIGS:
+        try:
+            conn = psycopg2.connect(**config)
+            cursor = conn.cursor()
+            for query in TRUNCATE_QUERIES:
+                cursor.execute(query)
+            conn.commit()
+            cursor.close()
+            conn.close()
+            print(f"Truncate successful for {config['host']}")
+        except Exception as e:
+            print(f"Failed for {config['host']}: {str(e)}")
