@@ -48,3 +48,54 @@ else
 fi
 
 # The rest of the script remains the same...
+==================================================
+
+
+
+
+Step 5: Configure Jenkins Job
+Add Build Step:
+
+If you are using a Freestyle project, add a "Execute shell" build step and paste the script above.
+If you are using a Pipeline, you can use the sh step to run the script.
+Set Environment Variables:
+
+Make sure to set the necessary environment variables for AWS CLI and PostgreSQL connection details.
+Step 6: Schedule the Job
+Configure Build Triggers:
+In the job configuration, scroll down to "Build Triggers".
+Check "Build periodically" and set a cron schedule (e.g., H 0 * * 0 for every Sunday at midnight).
+Step 7: Test the Job
+Run the Job:
+Manually trigger the job to ensure it works as expected.
+Check the console output for any errors and verify that the tables are truncated.
+Step 8: Repeat for Other Environments
+You can either create separate jobs for each environment (test, stage, preprod) or modify the script to accept an environment parameter and run the appropriate commands based on that.
+
+Example for Multiple Environments
+If you want to handle multiple environments in a single job, you can modify the script to accept an environment parameter:
+
+bash
+Insert Code
+Run
+Copy code
+# Get environment parameter
+ENVIRONMENT=$1
+
+# Set DB_NAME based on the environment
+if [ "$ENVIRONMENT" == "test" ]; then
+    DB_NAME="test-highwire-current"
+elif [ "$ENVIRONMENT" == "stage" ]; then
+    DB_NAME="stage-highwire-current"
+elif [ "$ENVIRONMENT" == "preprod" ]; then
+    DB_NAME="preprod-highwire-current"
+else
+    echo "Invalid environment specified."
+    exit 1
+fi
+
+# The rest of the script remains the same...
+You can then call this script with the environment as an argument in Jenkins.
+
+Conclusion
+By following these steps, you can successfully schedule and run the TRUNCATE queries on your PostgreSQL databases using Jenkins. Make sure to test thoroughly and monitor the job for any issues.
