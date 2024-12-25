@@ -1,0 +1,50 @@
+#!/bin/bash
+
+# Set environment variables for AWS CLI
+export AWS_REGION="your-aws-region"
+
+# Function to get parameter from AWS Parameter Store
+get_parameter() {
+    aws ssm get-parameter --name "$1" --with-decryption --query "Parameter.Value" --output text
+}
+
+# Get DB credentials from AWS Parameter Store
+DB_USERNAME=$(get_parameter "mgmt/jenkins/test/db-username")
+DB_PASSWORD=$(get_parameter "mgmt/jenkins/test/db-password")
+
+# Define the database connection details
+DB_HOST="your-db-host"
+DB_PORT="5432" # Default PostgreSQL port
+DB_NAME="test-highwire-current" # Change this for other environments
+
+# Execute TRUNCATE commands
+psql -h "$DB_HOST" -U "$DB_USERNAME" -d "$DB_NAME" -c "
+TRUNCATE TABLE public.batch_job_execution CASCADE;
+TRUNCATE TABLE public.batch_job_execution_context CASCADE;
+TRUNCATE TABLE public.batch_job_execution_params CASCADE;
+TRUNCATE TABLE public.batch_job_instance CASCADE;
+TRUNCATE TABLE public.batch_step_execution CASCADE;
+TRUNCATE TABLE public.batch_step_execution_context CASCADE;
+" --password="$DB_PASSWORD"
+
+
+
+
+=======================
+
+# Get environment parameter
+ENVIRONMENT=$1
+
+# Set DB_NAME based on the environment
+if [ "$ENVIRONMENT" == "test" ]; then
+    DB_NAME="test-highwire-current"
+elif [ "$ENVIRONMENT" == "stage" ]; then
+    DB_NAME="stage-highwire-current"
+elif [ "$ENVIRONMENT" == "preprod" ]; then
+    DB_NAME="preprod-highwire-current"
+else
+    echo "Invalid environment specified."
+    exit 1
+fi
+
+# The rest of the script remains the same...
