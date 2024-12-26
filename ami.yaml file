@@ -1,0 +1,41 @@
+---
+
+- hosts: all
+  vars_files:
+    - ../ansible/vars/users.yml
+  #  - ../ansible/vars/datadog.yml
+  roles:
+    - role: ../ansible/roles/users
+      users: "{{ admins + developers }}"
+    #- role: ../ansible/roles/Datadog.datadog
+
+  tasks:
+    - name: Install packages
+      yum:
+        name: "{{ packages }}"
+        state: present
+        update_cache: yes
+      vars:
+        packages:
+          - bind-utils
+          - htop
+          - nc
+          - traceroute
+          - java
+          - git
+          - awscli
+          - docker
+          - nano
+          - vim
+          
+
+    - name: Enable docker service
+      service:
+        name: docker
+        enabled: yes
+
+    - name: Add ec2-user to docker group
+      user:
+        name: ec2-user
+        groups: docker
+        append: yes
